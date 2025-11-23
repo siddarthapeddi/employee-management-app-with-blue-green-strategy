@@ -6,7 +6,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    url: url: 'https://github.com/siddhartha-peddi/employee-management-app-with-blue-green-strategy.git'
+                    url:'https://github.com/siddhartha-peddi/employee-management-app-with-blue-green-strategy.git'
 
             }
         }
