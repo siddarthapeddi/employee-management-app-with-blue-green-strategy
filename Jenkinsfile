@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    options {
+        skipDefaultCheckout(true)
+    }
+
     tools {
         maven 'Maven-3.9.11'
         nodejs 'Node-24'
@@ -15,15 +19,16 @@ pipeline {
                     branches: [[name: '*/main']],
                     userRemoteConfigs: [[
                         url: 'https://github.com/siddarthapeddi/employee-management-app-with-blue-green-strategy.git',
-                        credentialsId: 'github-pat'
+                        credentialsId: 'github-token'
                     ]]
                 ])
+                echo "✔ Checkout done"
             }
         }
 
         stage('Backend Build') {
             steps {
-                echo "🔧 Building Backend with Maven"
+                echo "🔧 Building backend using Maven"
                 dir('backend') {
                     bat 'mvn -version'
                     bat 'mvn clean package -DskipTests'
@@ -33,7 +38,7 @@ pipeline {
 
         stage('Frontend Build') {
             steps {
-                echo "🌐 Building Frontend"
+                echo "🌐 Building frontend"
                 dir('frontend') {
                     bat 'npm install'
                     bat 'npm run build'
@@ -48,16 +53,9 @@ pipeline {
             }
         }
 
-        stage('Docker Build (Skipped)') {
-            when { expression { false } }
+        stage('Blue-Green Deployment (Skipped)') {
             steps {
-                echo "🐳 Docker skipped on Windows"
-            }
-        }
-
-        stage('Blue-Green Deployment (Simulated)') {
-            steps {
-                echo "🔵🟢 Blue-Green deploy skipped"
+                echo "🔵🟢 Blue-Green deploy skipped (Windows)"
             }
         }
     }
