@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    tools {
+        maven 'Maven-3.9.11'
+    }
+
     stages {
 
         stage('Checkout') {
@@ -18,14 +22,19 @@ pipeline {
 
         stage('Backend Build') {
             steps {
-                dir('backend') {
-                    bat 'mvn clean package -DskipTests'
+                echo "🔧 Using Maven from Jenkins tool configuration"
+                withMaven(maven: 'Maven-3.9.11') {
+                    dir('backend') {
+                        bat 'mvn -version'
+                        bat 'mvn clean package -DskipTests'
+                    }
                 }
             }
         }
 
         stage('Frontend Build') {
             steps {
+                echo "🌐 Running frontend build"
                 dir('frontend') {
                     bat 'npm install'
                     bat 'npm run build'
@@ -42,16 +51,16 @@ pipeline {
 
         stage('Docker Build (Optional)') {
             when {
-                expression { return fileExists('docker/Dockerfile') }
+                expression { return false }  // Always skip on Windows
             }
             steps {
-                echo "Docker build requires Linux — skipping on Windows."
+                echo "🐳 Docker build skipped on Windows."
             }
         }
 
         stage('Blue-Green Deployment (Simulated)') {
             steps {
-                echo "Blue-Green deploy disabled — requires Linux + Docker Swarm."
+                echo "🔵🟢 Blue-Green deploy skipped (Linux required)."
             }
         }
     }
