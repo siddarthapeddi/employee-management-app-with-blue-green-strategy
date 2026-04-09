@@ -1,0 +1,374 @@
+================================================================================
+EMPLOYEE MANAGEMENT APP - BLUE-GREEN DEPLOYMENT STRATEGY
+================================================================================
+
+WHAT IS BLUE-GREEN DEPLOYMENT?
+================================================================================
+
+Two identical production environments run simultaneously:
+- BLUE = Current active environment (serving users)
+- GREEN = Staging environment (receiving updates)
+
+When new code is ready, traffic switches from Blue to Green instantly, allowing 
+rollback if needed.
+
+
+PROJECT STRUCTURE FOR BLUE-GREEN
+================================================================================
+
+employee-management-app-with-blue-green-strategy/
+├── scripts/deploy.sh              ← Deployment orchestration script
+├── infra/                         ← Infrastructure as Code (Terraform)
+│   ├── swarm.tf                   ← Docker Swarm setup
+│   ├── provider.tf                ← AWS provider config
+│   ├── variables.tf               ← Environment variables
+│   ├── user_data_manager.sh       ← Manager node initialization
+│   ├── user_data_worker.sh        ← Worker node initialization
+│   └── output.tf                  ← Output values (IP addresses)
+├── docker-stack-app.yml           ← Application services config
+├── docker-stack-db.yml            ← Database services config
+├── Jenkinsfile                    ← CI/CD pipeline
+├── backend/                       ← Spring Boot API
+└── frontend/                      ← React application
+
+
+HOW BLUE-GREEN DEPLOYMENT WORKS
+================================================================================
+
+File: scripts/deploy.sh
+
+This is the main deployment orchestrator. Usage:
+
+  ./scripts/deploy.sh <MANAGER_IP> <NEW_VERSION> <TARGET>
+
+Example:
+  ./scripts/deploy.sh 54.201.xx.xx v2 green
+
+Parameters:
+  - MANAGER_IP: Docker Swarm manager node IP
+  - NEW_VERSION: Docker image tag (v1, v2, v3, etc.)
+  - TARGET: Deployment target - 'blue' or 'green'
+
+What it does:
+
+  STEP 1: Create Overlay Network
+  Command: docker network create --driver overlay --attachable emp_network
+  Purpose: Enables communication between nodes and services
+
+  STEP 2: Deploy MySQL Database (if not running)
+  File: docker-stack-db.yml
+  Command: docker stack deploy -c docker-stack-db.yml empapp_db
+  Services: mysqldb (MySQL 8.0)
+  Port: 3306
+
+  STEP 3: Deploy Application to Target (Blue/Green)
+  File: docker-stack-app.yml
+  Commands:
+    VERSION=v2 BACKEND_PORT=8080 FRONTEND_PORT=3000 \
+    docker stack deploy -c docker-stack-app.yml empapp
+
+  Services deployed:
+    - backend (Spring Boot service on port 8080)
+    - frontend (Nginx/React service on port 3000)
+
+  STEP 4: Load Balancer/DNS Switches Traffic
+  Current: Blue receiving traffic
+  Action: Switch to Green
+  Result: New version is now live
+
+
+REAL-WORLD DEPLOYMENT SCENARIO
+================================================================================
+
+Scenario: Deploy new employee feature (v1 → v2)
+
+Time: Monday 10:00 AM
+  - Blue environment: Running naresh240/backend-app:v1 and naresh240/frontend-app:v1
+  - Users are connected to Blue
+  - Traffic: 54.201.xx.xx:3000 → Blue load balancer → frontend v1
+
+Time: Monday 10:30 AM - Developer commits new feature
+  - Code pushed to GitHub
+  - Jenkinsfile triggers CI/CD pipeline
+
+Time: Monday 10:45 AM - Jenkins builds and tests
+  //Jenkinsfile executes:
+  stage('Backend Build') {
+    dir('backend') {
+      bat 'mvn clean package -DskipTests'
+    }
+  }
+
+  stage('Frontend Build') {
+    dir('frontend') {
+      bat 'npm install'
+      bat 'npm run build'
+    }
+  }
+
+  stage('Docker Build & Push') {
+    docker build -t naresh240/backend-app:v2 backend/
+    docker build -t naresh240/frontend-app:v2 frontend/
+    docker push naresh240/backend-app:v2
+    docker push naresh240/frontend-app:v2
+  }
+
+Time: Monday 11:00 AM - Deploy to Green
+  // SSH to Docker Swarm manager
+  ssh ec2-user@54.201.xx.xx
+
+  // Deploy new version to GREEN environment
+  ./scripts/deploy.sh 54.201.xx.xx v2 green
+
+  // What happens:
+  // 1. Copies docker-stack-app.yml to manager node
+  // 2. Sets VERSION=v2
+  // 3. Deploys new services: empapp_green stack
+  // 4. Services running with v2 images
+  // 5. Green is now warm and ready but NOT receiving traffic
+
+Time: Monday 11:05 AM - Testing Green environment
+  // Health checks run
+  curl http://54.201.xx.xx:8080/api/employees  // Backend responds
+  curl http://54.201.xx.xx:3000                // Frontend responds
+
+  // Test employee operations:
+  POST /api/employees/add { "empno": "E999", ... }
+  GET /api/employees
+  // All working → Green is healthy
+
+Time: Monday 11:10 AM - Switch traffic to Green
+  Before:
+    User requests → External Load Balancer → Blue (v1) → MySQL
+
+  After (DNS/LB switch):
+    User requests → External Load Balancer → Green (v2) → MySQL
+
+Time: Monday 11:15 AM - Monitor Green
+  - Application works correctly
+  - No errors in logs
+  - Employees can add/view data
+  - Green is now production
+
+Time: Monday 11:20 AM - Old Blue environment kept running
+  Blue (v1) stays running but receives NO traffic. If Green has issues:
+
+  // Immediate rollback to Blue
+  ./scripts/deploy.sh 54.201.xx.xx v1 blue
+  // Traffic switches back instantly
+
+
+INFRASTRUCTURE SETUP (TERRAFORM)
+================================================================================
+
+Files: infra/ folder
+
+These set up the AWS infrastructure for the blue-green strategy:
+
+  infra/provider.tf
+    - Defines AWS region and authentication
+
+  infra/variables.tf
+    - Input variables (instance type, keyname, etc.)
+
+  infra/swarm.tf
+    - Creates EC2 instances and Docker Swarm
+
+  infra/user_data_manager.sh
+    - Script to initialize manager node
+
+  infra/user_data_worker.sh
+    - Script to initialize worker nodes
+
+  infra/output.tf
+    - Outputs manager/worker IP addresses
+
+Usage:
+
+  cd infra
+  terraform init
+  terraform plan
+  terraform apply
+
+  Creates:
+  - 1 Docker Swarm Manager node (manager.example.com)
+  - 2+ Docker Swarm Worker nodes
+  - Security groups allowing swarm communication
+
+
+CI/CD PIPELINE (JENKINS)
+================================================================================
+
+File: Jenkinsfile
+
+Automates the entire deployment workflow:
+
+  pipeline {
+    agent any
+    
+    stages {
+      stage('Checkout') {
+        // Clone latest code from GitHub
+      }
+
+      stage('Backend Build') {
+        // mvn clean package -DskipTests
+        // Creates JAR file
+      }
+
+      stage('Frontend Build') {
+        // npm install && npm run build
+        // Creates optimized React bundle
+      }
+
+      stage('Archive Build Artifacts') {
+        // Saves JAR and build folder
+      }
+
+      stage('Docker Build & Push') {
+        // docker build -t naresh240/backend-app:v2 backend/
+        // docker build -t naresh240/frontend-app:v2 frontend/
+        // Pushes to Docker Hub
+      }
+
+      stage('Deploy to Green') {
+        // Calls ./scripts/deploy.sh manager-ip v2 green
+        // Deploys new version
+      }
+
+      stage('Health Check') {
+        // Verifies services are running
+      }
+
+      stage('Switch Traffic') {
+        // Manual approval or automatic
+        // Switches load balancer to Green
+      }
+    }
+  }
+
+
+COMPLETE BLUE-GREEN WORKFLOW DIAGRAM
+================================================================================
+
+DEVELOPER COMMITS CODE
+  ↓
+  File: backend/src/main/java/com/example/demo/...
+  Commit: "Add employee delete feature" → Push to GitHub
+  ↓
+
+JENKINS WEBHOOK TRIGGERED (Jenkinsfile)
+  ↓
+  Stages:
+  1. Checkout code
+  2. Maven build (backend/pom.xml)
+  3. NPM build (frontend/package.json)
+  4. Docker build (backend/Dockerfile, frontend/Dockerfile)
+  5. Docker push (v2 images to Docker Hub)
+  ↓
+
+DEPLOY TO GREEN ENVIRONMENT
+  ↓
+  Command: ./scripts/deploy.sh 54.201.xx.xx v2 green
+  
+  Deploys (docker-stack-app.yml, docker-stack-db.yml):
+  - backend:v2 (Spring Boot)
+  - frontend:v2 (React/Nginx)
+  - mysql:8.0 (Database)
+  
+  Network: emp_network (Docker Swarm overlay)
+  Port mapping:
+  - 8080 → backend (Green)
+  - 3000 → frontend (Green)
+  - 3306 → mysql (shared)
+  ↓
+
+HEALTH CHECKS ON GREEN
+  ↓
+  curl http://54.201.xx.xx:8080/api/employees → 200 OK
+  curl http://54.201.xx.xx:3000 → 200 OK
+  Test API: POST /api/employees/add → Success
+  Test UI: Load form, add employee → Success
+  ↓
+
+SWITCH TRAFFIC (Blue → Green)
+  ↓
+  AWS Load Balancer updates target group:
+  users.example.com → Green (v2) instances
+  
+  Blue (v1) remains running but idle (for quick rollback)
+  ↓
+
+GREEN IS NOW PRODUCTION
+  ↓
+  All user traffic → backend:v2, frontend:v2
+  Monitoring: Check logs, error rates, response times
+  
+  If issues found → Rollback: ./deploy.sh ... v1 blue
+
+
+KEY BENEFITS OF THIS SETUP
+================================================================================
+
+ZERO DOWNTIME
+  How: Blue always running, switch to Green instantly
+
+EASY ROLLBACK
+  How: Keep Blue running, switch back if Green fails
+
+CI/CD AUTOMATED
+  How: Jenkins builds, tests, deploys automatically
+
+INFRASTRUCTURE AS CODE
+  How: Terraform creates/destroys environments
+
+MULTI-NODE SCALABILITY
+  How: Docker Swarm with manager + workers
+
+SERVICE DISCOVERY
+  How: Swarm overlay network provides DNS
+
+LOAD BALANCED
+  How: AWS ALB distributes traffic
+
+
+FILE USAGE SUMMARY
+================================================================================
+
+User Code Change
+   ↓
+GitHub Push
+   ↓
+Jenkinsfile (triggered)
+   ├─ backend/pom.xml (build Java)
+   ├─ frontend/package.json (build React)
+   ├─ backend/Dockerfile (create image)
+   ├─ frontend/Dockerfile (create image)
+   └─ Deploy to Docker Hub
+      ↓
+scripts/deploy.sh (called by Jenkins)
+   ├─ docker-stack-db.yml (deploy MySQL)
+   ├─ docker-stack-app.yml (deploy app)
+   └─ Services connect via emp_network
+      ↓
+Load Balancer switches to Green
+   ↓
+Users access new version (v2)
+
+
+SUMMARY
+================================================================================
+
+The project is fully automated for safe, zero-downtime deployments using 
+industry-standard blue-green strategy.
+
+Key Components:
+  - Terraform: Creates infrastructure
+  - Docker Swarm: Orchestrates containers
+  - Jenkins: Automates CI/CD
+  - Scripts: Deploys to blue or green
+  - Load Balancer: Routes traffic
+
+Result: Reliable, scalable, enterprise-grade deployment pipeline.
+
+================================================================================
