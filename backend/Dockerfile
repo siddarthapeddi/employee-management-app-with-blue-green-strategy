@@ -1,4 +1,4 @@
-FROM openjdk:19-jdk-alpine3.16
+FROM eclipse-temurin:17-jdk
 WORKDIR /app
 ADD ./target/*.jar app.jar
 EXPOSE 8080

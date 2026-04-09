@@ -18,4 +18,9 @@ public class EmployeeController {
 
     @GetMapping
     public List<Employee> getEmployees() { return service.findAll(); }
+
+    @GetMapping("/")
+    public String home() {
+        return "Employee Management API is running";
+    }
 }

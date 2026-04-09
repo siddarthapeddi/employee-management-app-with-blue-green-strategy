@@ -1,0 +1,9 @@
+# Ignore build artifacts and local dependencies
+/backend/target/
+/frontend/node_modules/
+
+# IDE and OS files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

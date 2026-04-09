@@ -10,7 +10,9 @@ services:
     ports:
       - "${BACKEND_PORT}:8080"
     networks:
-      - emp_network
+      emp_network:
+        aliases:
+          - backend
 
   frontend:
     image: naresh240/frontend-app:${VERSION}
